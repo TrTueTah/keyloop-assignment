@@ -1,0 +1,327 @@
+openapi: 3.1.0
+info:
+  title: Unified Service Scheduler API
+  version: 1.0.0
+  description: |
+    Design-time contract for feature 001. The running service generates its own OpenAPI document
+    from DTOs (`@nestjs/swagger`, served at `/openapi.json`). An e2e contract test compares the
+    generated document's paths, operations, status codes and error codes against this file
+    (Principle VI).
+
+    **Tenant context:** every `/api/v1` request MUST send `X-Tenant-ID` and `X-User-ID`. These stand
+    in for JWT claims (D4). Resources outside the caller's tenant always return 404.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: Reference
+  - name: Availability
+  - name: Appointments
+  - name: Operations
+
+security: []
+
+paths:
+  /api/v1/dealerships:
+    get:
+      tags: [Reference]
+      summary: List dealerships of the caller's tenant
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Dealership' } } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/service-types:
+    get:
+      tags: [Reference]
+      summary: List the tenant's service catalogue
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ServiceType' } } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/dealerships/{dealershipId}/technicians:
+    get:
+      tags: [Reference]
+      summary: Technicians at a site, with skills (FR-022)
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Technician' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/dealerships/{dealershipId}/service-bays:
+    get:
+      tags: [Reference]
+      summary: Service bays at a site, with capabilities (FR-022)
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ServiceBay' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/dealerships/{dealershipId}/availability:
+    get:
+      tags: [Availability]
+      summary: Free start times for a service type on a dealership-local date (FR-011)
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/UserId' }
+        - { $ref: '#/components/parameters/DealershipId' }
+        - { name: serviceTypeId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, description: Dealership-local date, schema: { type: string, format: date, example: '2026-11-10' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AvailabilityResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/dealerships/{dealershipId}/appointments:
+    post:
+      tags: [Appointments]
+      summary: Book an appointment (auto-assign; optional pinned technician/bay)
+      description: |
+        Duration is taken from the service type. Requires `Idempotency-Key` (FR-010):
+        - same key + same body → 200 with the original appointment
+        - same key + different body → 422 `IDEMPOTENCY_KEY_REUSED`
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/UserId' }
+        - { $ref: '#/components/parameters/DealershipId' }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateAppointmentRequest' } } }
+      responses:
+        '201':
+          description: Created
+          headers: { Location: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } }
+        '200': { description: Idempotent replay, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: SLOT_UNAVAILABLE (with alternatives) | RESOURCE_UNAVAILABLE | VEHICLE_ALREADY_BOOKED
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/ConflictProblem' } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    get:
+      tags: [Appointments]
+      summary: Day view, ordered by start time, cursor-paginated (FR-020)
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/UserId' }
+        - { $ref: '#/components/parameters/DealershipId' }
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/AppointmentStatus' } }
+        - { name: technicianId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: Opaque cursor from `nextCursor` }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AppointmentPage' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/dealerships/{dealershipId}/appointments/{appointmentId}:
+    get:
+      tags: [Appointments]
+      summary: Fetch one appointment
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }, { $ref: '#/components/parameters/AppointmentId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/dealerships/{dealershipId}/appointments/{appointmentId}/assignment:
+    patch:
+      tags: [Appointments]
+      summary: Manually reassign technician and/or bay (FR-015..017, FR-019)
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }, { $ref: '#/components/parameters/AppointmentId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReassignRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: RESOURCE_UNAVAILABLE | STALE_VERSION | NOT_CONFIRMED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/dealerships/{dealershipId}/appointments/{appointmentId}/cancel:
+    post:
+      tags: [Appointments]
+      summary: Cancel and free capacity (FR-018, FR-019)
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }, { $ref: '#/components/parameters/AppointmentId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionedRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: STALE_VERSION | NOT_CONFIRMED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/dealerships/{dealershipId}/appointments/{appointmentId}/events:
+    get:
+      tags: [Appointments]
+      summary: Appointment history in time order (FR-021)
+      parameters: [{ $ref: '#/components/parameters/TenantId' }, { $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/DealershipId' }, { $ref: '#/components/parameters/AppointmentId' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AppointmentEvent' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /health/live:
+    get: { tags: [Operations], summary: Liveness, responses: { '200': { description: Process up } } }
+  /health/ready:
+    get: { tags: [Operations], summary: Readiness (DB reachable, migrations applied), responses: { '200': { description: Ready }, '503': { description: Not ready } } }
+  /metrics:
+    get: { tags: [Operations], summary: Prometheus scrape endpoint, responses: { '200': { description: OK, content: { text/plain: { schema: { type: string } } } } } }
+
+components:
+  parameters:
+    TenantId: { name: X-Tenant-ID, in: header, required: true, schema: { type: string, format: uuid }, description: Stand-in for JWT tenant claim }
+    UserId: { name: X-User-ID, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: Stand-in for JWT subject }
+    DealershipId: { name: dealershipId, in: path, required: true, schema: { type: string, format: uuid } }
+    AppointmentId: { name: appointmentId, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    NotFound:
+      description: NOT_FOUND (also returned for other tenants' resources)
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unprocessable:
+      description: >
+        VALIDATION_FAILED | START_IN_PAST | NOT_ON_SLOT_GRID | OUTSIDE_BOOKING_HORIZON | OUTSIDE_OPENING_HOURS |
+        VEHICLE_NOT_OWNED_BY_CUSTOMER | TECHNICIAN_NOT_QUALIFIED | BAY_NOT_COMPATIBLE | RESOURCE_INACTIVE |
+        RESOURCE_NOT_IN_DEALERSHIP | IDEMPOTENCY_KEY_REUSED
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    ErrorCode:
+      type: string
+      enum: [NOT_FOUND, VALIDATION_FAILED, START_IN_PAST, NOT_ON_SLOT_GRID, OUTSIDE_BOOKING_HORIZON, OUTSIDE_OPENING_HOURS,
+             VEHICLE_NOT_OWNED_BY_CUSTOMER, TECHNICIAN_NOT_QUALIFIED, BAY_NOT_COMPATIBLE, RESOURCE_INACTIVE,
+             RESOURCE_NOT_IN_DEALERSHIP, IDEMPOTENCY_KEY_REUSED, SLOT_UNAVAILABLE, RESOURCE_UNAVAILABLE,
+             VEHICLE_ALREADY_BOOKED, STALE_VERSION, NOT_CONFIRMED, INTERNAL_ERROR]
+    Problem:
+      type: object
+      description: RFC 9457 problem details. MUST NOT contain customer PII.
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, example: 'https://errors.scheduler.local/slot-unavailable' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        requestId: { type: string }
+        errors:
+          type: array
+          description: Field errors (VALIDATION_FAILED only)
+          items: { type: object, properties: { field: { type: string }, message: { type: string } } }
+    ConflictProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            alternatives:
+              type: array
+              maxItems: 5
+              description: Present for SLOT_UNAVAILABLE; same day first, then up to 7 days ahead
+              items: { $ref: '#/components/schemas/Slot' }
+
+    Dealership:
+      type: object
+      required: [id, name, timezone]
+      properties: { id: { type: string, format: uuid }, name: { type: string }, timezone: { type: string, example: Europe/London } }
+    ServiceType:
+      type: object
+      required: [id, code, name, durationMinutes, requiredSkill, requiredCapabilities]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        durationMinutes: { type: integer }
+        requiredSkill: { type: string, example: EV_HIGH_VOLTAGE }
+        requiredCapabilities: { type: array, items: { type: string }, example: [LIFT, EV_CHARGER] }
+    Technician:
+      type: object
+      required: [id, name, active, skills]
+      properties: { id: { type: string, format: uuid }, name: { type: string }, active: { type: boolean }, skills: { type: array, items: { type: string } } }
+    ServiceBay:
+      type: object
+      required: [id, name, active, capabilities]
+      properties: { id: { type: string, format: uuid }, name: { type: string }, active: { type: boolean }, capabilities: { type: array, items: { type: string } } }
+
+    Slot:
+      type: object
+      required: [startAt, endAt, availableTechnicians, availableBays]
+      properties:
+        startAt: { type: string, format: date-time, example: '2026-11-10T10:00:00+00:00' }
+        endAt: { type: string, format: date-time }
+        availableTechnicians: { type: integer, minimum: 1 }
+        availableBays: { type: integer, minimum: 1 }
+    AvailabilityResponse:
+      type: object
+      required: [dealershipId, serviceTypeId, date, timezone, slots]
+      properties:
+        dealershipId: { type: string, format: uuid }
+        serviceTypeId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        timezone: { type: string }
+        slots: { type: array, items: { $ref: '#/components/schemas/Slot' } }
+
+    AppointmentStatus: { type: string, enum: [CONFIRMED, CANCELLED, COMPLETED, NO_SHOW] }
+    CreateAppointmentRequest:
+      type: object
+      additionalProperties: false
+      required: [customerId, vehicleId, serviceTypeId, startAt]
+      properties:
+        customerId: { type: string, format: uuid }
+        vehicleId: { type: string, format: uuid }
+        serviceTypeId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time, description: ISO-8601 with offset; must be on the dealership-local 15-min grid }
+        channel: { type: string, enum: [ONLINE, PHONE, WALK_IN, ADVISOR], default: ADVISOR }
+        technicianId: { type: string, format: uuid, description: Optional pin (FR-014) }
+        serviceBayId: { type: string, format: uuid, description: Optional pin (FR-014) }
+    VersionedRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties: { version: { type: integer, minimum: 1 } }
+    ReassignRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      minProperties: 2
+      description: At least one of technicianId / serviceBayId
+      properties:
+        version: { type: integer, minimum: 1 }
+        technicianId: { type: string, format: uuid }
+        serviceBayId: { type: string, format: uuid }
+    Appointment:
+      type: object
+      required: [id, dealershipId, customerId, vehicleId, serviceTypeId, technicianId, serviceBayId, startAt, endAt, status, assignmentMode, channel, createdBy, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        dealershipId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        vehicleId: { type: string, format: uuid }
+        serviceTypeId: { type: string, format: uuid }
+        technicianId: { type: string, format: uuid }
+        serviceBayId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time, description: Rendered in the dealership's offset }
+        endAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/AppointmentStatus' }
+        assignmentMode: { type: string, enum: [AUTO, MANUAL] }
+        channel: { type: string, enum: [ONLINE, PHONE, WALK_IN, ADVISOR] }
+        createdBy: { type: string }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AppointmentPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Appointment' } }
+        nextCursor: { type: [string, 'null'] }
+    AppointmentEvent:
+      type: object
+      required: [id, type, actor, occurredAt, payload]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [CREATED, REASSIGNED, CANCELLED] }
+        actor: { type: string }
+        occurredAt: { type: string, format: date-time }
+        payload: { type: object, description: IDs/enums only; REASSIGNED has before/after technicianId & serviceBayId }
