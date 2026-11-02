@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["src/**/*.ts", "scripts/db-migrate.ts", "scripts/db-seed.ts"],
+  "exclude": ["test", "node_modules", "dist"]
+}

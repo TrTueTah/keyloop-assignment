@@ -1,0 +1,80 @@
+{
+  "name": "unified-service-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Keyloop Scenario A: multi-tenant, race-safe service appointment scheduler (NestJS + PostgreSQL)",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --require ./dist/src/tracing.js dist/src/main.js",
+    "start:dev": "ts-node --transpile-only -r ./src/tracing.ts src/main.ts",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest --selectProjects unit",
+    "test:int": "jest --selectProjects int --runInBand",
+    "test:e2e": "jest --selectProjects e2e --runInBand",
+    "test:all": "pnpm test && pnpm test:int && pnpm test:e2e",
+    "db:migrate": "ts-node --transpile-only scripts/db-migrate.ts",
+    "db:migrate:prod": "node dist/scripts/db-migrate.js",
+    "db:seed": "ts-node --transpile-only scripts/db-seed.ts",
+    "db:seed:prod": "node dist/scripts/db-seed.js",
+    "demo:race": "ts-node --transpile-only scripts/demo-race.ts",
+    "perf:smoke": "ts-node --transpile-only scripts/perf-smoke.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.8",
+    "@nestjs/core": "11.2.8",
+    "@nestjs/platform-express": "11.2.8",
+    "@nestjs/swagger": "11.4.7",
+    "@nestjs/terminus": "11.1.1",
+    "@nestjs/typeorm": "11.0.3",
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/auto-instrumentations-node": "0.82.0",
+    "@opentelemetry/exporter-prometheus": "0.300.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.300.0",
+    "@opentelemetry/sdk-node": "0.300.0",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.14.4",
+    "luxon": "3.7.2",
+    "nestjs-pino": "4.6.1",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "typeorm": "0.3.31"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "11.2.8",
+    "@testcontainers/postgresql": "11.14.0",
+    "@types/express": "5.0.6",
+    "@types/jest": "30.0.0",
+    "@types/js-yaml": "4.0.9",
+    "@types/luxon": "3.7.6",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "jest": "30.5.2",
+    "js-yaml": "4.1.0",
+    "prettier": "3.9.10",
+    "supertest": "7.3.1",
+    "ts-jest": "29.4.15",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "cpu-features",
+      "ssh2",
+      "protobufjs"
+    ]
+  }
+}

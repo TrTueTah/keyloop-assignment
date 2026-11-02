@@ -1,0 +1,113 @@
+### Unified Service Scheduler: example requests (VS Code REST Client / JetBrains HTTP Client)
+### Seed ids are fixed (src/infrastructure/persistence/seed/fixtures.ts). Change @day to a future weekday.
+
+@api = http://localhost:3000/api/v1
+@acme = 11111111-0000-0000-0000-000000000001
+@beta = 11111111-0000-0000-0000-000000000002
+@leeds = 22222222-0000-0000-0000-000000000001
+@race = 22222222-0000-0000-0000-000000000004
+@oil = 33333333-0000-0000-0000-000000000001
+@alignment = 33333333-0000-0000-0000-000000000003
+@customer = 44444444-0000-0000-0000-000000000001
+@vehicle = 55555555-0000-0000-0000-000000000001
+@alexTech = 66666666-0000-0000-0000-000000000001
+@alignBay = 77777777-0000-0000-0000-000000000002
+@day = 2026-11-10
+@appointmentId = REPLACE_WITH_ID_FROM_BOOKING
+
+### Health
+GET http://localhost:3000/health/ready
+
+### Reference data: dealerships of my tenant
+GET {{api}}/dealerships
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### Reference data: service catalogue
+GET {{api}}/service-types
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### Technicians (with skills) at Acme Leeds
+GET {{api}}/dealerships/{{leeds}}/technicians
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### Service bays (with capabilities) at Acme Leeds
+GET {{api}}/dealerships/{{leeds}}/service-bays
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### US2: availability for an oil change
+GET {{api}}/dealerships/{{leeds}}/availability?serviceTypeId={{oil}}&date={{day}}
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### US1: book (auto-assign). Re-send unchanged → 200 replay; change the body → 422 IDEMPOTENCY_KEY_REUSED
+POST {{api}}/dealerships/{{leeds}}/appointments
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+Idempotency-Key: demo-1
+Content-Type: application/json
+
+{
+  "customerId": "{{customer}}",
+  "vehicleId": "{{vehicle}}",
+  "serviceTypeId": "{{oil}}",
+  "startAt": "{{day}}T10:00:00Z",
+  "channel": "PHONE"
+}
+
+### US1: same vehicle, overlapping time → 409 VEHICLE_ALREADY_BOOKED
+POST {{api}}/dealerships/{{leeds}}/appointments
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+Idempotency-Key: demo-2
+Content-Type: application/json
+
+{ "customerId": "{{customer}}", "vehicleId": "{{vehicle}}", "serviceTypeId": "{{oil}}", "startAt": "{{day}}T10:15:00Z" }
+
+### US4: book with a pinned technician (mode MANUAL)
+POST {{api}}/dealerships/{{leeds}}/appointments
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+Idempotency-Key: demo-3
+Content-Type: application/json
+
+{ "customerId": "{{customer}}", "vehicleId": "{{vehicle}}", "serviceTypeId": "{{oil}}", "startAt": "{{day}}T14:00:00Z", "technicianId": "{{alexTech}}" }
+
+### Fetch one appointment
+GET {{api}}/dealerships/{{leeds}}/appointments/{{appointmentId}}
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### US4: reassign the bay (send the version you last read; repeat → 409 STALE_VERSION)
+PATCH {{api}}/dealerships/{{leeds}}/appointments/{{appointmentId}}/assignment
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-2
+Content-Type: application/json
+
+{ "serviceBayId": "{{alignBay}}", "version": 1 }
+
+### US3: cancel (frees the slot immediately)
+POST {{api}}/dealerships/{{leeds}}/appointments/{{appointmentId}}/cancel
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-2
+Content-Type: application/json
+
+{ "version": 2 }
+
+### US5: day view
+GET {{api}}/dealerships/{{leeds}}/appointments?date={{day}}&limit=20
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### US5: history (CREATED → REASSIGNED → CANCELLED)
+GET {{api}}/dealerships/{{leeds}}/appointments/{{appointmentId}}/events
+X-Tenant-ID: {{acme}}
+X-User-ID: advisor-1
+
+### Isolation: Beta Autos asking for Acme Leeds → 404
+GET {{api}}/dealerships/{{leeds}}/technicians
+X-Tenant-ID: {{beta}}
+X-User-ID: beta-advisor
